@@ -33,10 +33,17 @@ pub struct PlannedPackage {
     pub action: Action,
 }
 
+#[derive(Debug, Clone)]
+pub struct RemovedPackage {
+    pub pkgname: String,
+    pub local: LocalPackage,
+}
+
 #[derive(Debug)]
 pub struct Plan {
     pub packages: Vec<PlannedPackage>,
     pub other_arch: usize,
+    pub removed: Vec<RemovedPackage>,
 }
 
 #[derive(Debug, Default)]
@@ -45,6 +52,7 @@ pub struct Summary {
     pub up_to_date: usize,
     pub downgraded: usize,
     pub packages_resigned: usize,
+    pub pruned: usize,
     pub failures: usize,
     pub database_signed: bool,
 }
@@ -58,6 +66,8 @@ pub struct SyncOptions<'a> {
     pub timeout: Duration,
     pub allow_downgrade: bool,
     pub keep_old: bool,
+    pub prune: bool,
+    pub allow_empty_manifest: bool,
 }
 
 pub fn build_plan(
@@ -76,8 +86,8 @@ pub fn build_plan(
             other_arch += 1;
             continue;
         }
-        if remote.pkgname.is_empty() {
-            bail!("manifest 中存在空的包名");
+        if let Err(error) = util::sanitize_pkgname(&remote.pkgname) {
+            bail!("manifest 中的包名无效: {error:#}");
         }
         if !seen.insert(remote.pkgname.clone()) {
             bail!("manifest 中包名重复: {}", remote.pkgname);
@@ -114,9 +124,20 @@ pub fn build_plan(
         });
     }
 
+    let mut removed: Vec<RemovedPackage> = db
+        .iter()
+        .filter(|(pkgname, _)| !seen.contains(*pkgname))
+        .map(|(pkgname, local)| RemovedPackage {
+            pkgname: (*pkgname).clone(),
+            local: (*local).clone(),
+        })
+        .collect();
+    removed.sort_by(|a, b| a.pkgname.cmp(&b.pkgname));
+
     Ok(Plan {
         packages,
         other_arch,
+        removed,
     })
 }
 
@@ -143,13 +164,12 @@ fn decide(
     })
 }
 
-pub fn print_plan(plan: &Plan) {
+pub fn print_plan(plan: &Plan, prune: bool, allow_empty_manifest: bool) {
     if plan.other_arch > 0 {
         util::detail(format!("忽略 {} 个其他架构的软件包", plan.other_arch));
     }
     if plan.packages.is_empty() {
         util::info("manifest 中没有目标架构的软件包");
-        return;
     }
 
     let mut actionable = 0;
@@ -199,11 +219,44 @@ pub fn print_plan(plan: &Plan) {
         }
     }
 
-    if actionable == 0 {
-        util::info("所有软件包均为最新");
-    } else {
-        util::info(format!("共 {actionable} 个软件包需要同步"));
+    for removed in &plan.removed {
+        if prune {
+            util::detail(format!(
+                "[删除] {} {}（manifest 中已不存在）",
+                removed.pkgname, removed.local.version
+            ));
+        } else {
+            util::detail(format!(
+                "[保留] {} {}（manifest 中已不存在，--no-prune）",
+                removed.pkgname, removed.local.version
+            ));
+        }
     }
+
+    if prune && !plan.removed.is_empty() && plan.packages.is_empty() && !allow_empty_manifest {
+        util::warn(
+            "manifest 中没有目标架构的软件包；实际执行时将拒绝删除全部本地软件包（需 --allow-empty-manifest）",
+        );
+    }
+
+    let removed = plan.removed.len();
+    if actionable == 0 && removed == 0 {
+        util::info("所有软件包均为最新");
+        return;
+    }
+
+    let mut parts = Vec::new();
+    if actionable > 0 {
+        parts.push(format!("{actionable} 个待同步"));
+    }
+    if removed > 0 {
+        if prune {
+            parts.push(format!("{removed} 个待删除"));
+        } else {
+            parts.push(format!("{removed} 个已从 manifest 移除（保留）"));
+        }
+    }
+    util::info(format!("共 {}", parts.join("，")));
 }
 
 pub fn execute(plan: &Plan, options: &SyncOptions) -> Result<Summary> {
@@ -289,6 +342,47 @@ pub fn execute(plan: &Plan, options: &SyncOptions) -> Result<Summary> {
         }
     }
 
+    // Packages that were removed from the manifest are removed from the local
+    // database and disk as well.
+    if options.prune && !plan.removed.is_empty() {
+        if plan.packages.is_empty() && !options.allow_empty_manifest {
+            bail!(
+                "manifest 中没有目标架构的软件包，拒绝删除全部本地软件包；如确认要清空仓库，请加 --allow-empty-manifest"
+            );
+        }
+
+        let names: Vec<String> = plan
+            .removed
+            .iter()
+            .map(|removed| removed.pkgname.clone())
+            .collect();
+        util::info(format!("运行 repo-remove 删除 {} 个软件包...", names.len()));
+        local_repo::repo_remove(options.runner, options.db_path, &names)?;
+        summary.pruned = names.len();
+
+        for removed in &plan.removed {
+            match local_repo::remove_package_files(options.repo_dir, &removed.local) {
+                Ok(paths) => {
+                    for path in paths {
+                        util::detail(format!(
+                            "已删除 {}",
+                            path.file_name().unwrap_or_default().to_string_lossy()
+                        ));
+                    }
+                }
+                Err(error) => {
+                    util::error(format!("{}: {error:#}", removed.pkgname));
+                    summary.failures += 1;
+                }
+            }
+        }
+    } else if !plan.removed.is_empty() {
+        util::info(format!(
+            "保留 {} 个已从 manifest 移除的软件包（--no-prune）",
+            plan.removed.len()
+        ));
+    }
+
     // repo-add is deliberately run without --sign so signing can use the
     // configured passphrase file. Sign the databases here, and heal a missing
     // or invalid signature even when no package changed.
@@ -337,8 +431,9 @@ fn print_summary(summary: &Summary) {
         ""
     };
     util::info(format!(
-        "完成：同步 {}，已是最新 {}，降级跳过 {}，补签 {}，失败 {}{database}",
+        "完成：同步 {}，删除 {}，已是最新 {}，降级跳过 {}，补签 {}，失败 {}{database}",
         summary.downloaded,
+        summary.pruned,
         summary.up_to_date,
         summary.downgraded,
         summary.packages_resigned,
@@ -689,6 +784,43 @@ mod tests {
         db.insert("demo".to_string(), local("2.0-1", &sha));
         let plan = build_plan(&manifest, &db, "x86_64", false, &dir).unwrap();
         assert_eq!(plan.packages[0].action, Action::Downgrade);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn finds_packages_removed_from_manifest() {
+        let dir = std::env::temp_dir().join(format!(
+            "arch-repo-update-prune-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+
+        let sha = "a".repeat(64);
+        let manifest = Manifest {
+            generated_at: None,
+            release: None,
+            packages: vec![remote("1.0-1", &sha)],
+        };
+
+        let mut db = HashMap::new();
+        db.insert("demo".to_string(), local("1.0-1", &sha));
+        db.insert(
+            "dropped".to_string(),
+            LocalPackage {
+                version: "2.0-1".to_string(),
+                filename: "dropped-2.0-1-x86_64.pkg.tar.zst".to_string(),
+                sha256: Some(sha.clone()),
+            },
+        );
+
+        let plan = build_plan(&manifest, &db, "x86_64", false, &dir).unwrap();
+        assert_eq!(plan.removed.len(), 1);
+        assert_eq!(plan.removed[0].pkgname, "dropped");
 
         fs::remove_dir_all(&dir).unwrap();
     }

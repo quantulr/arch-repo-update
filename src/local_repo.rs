@@ -100,6 +100,13 @@ pub fn read_db(path: &Path) -> Result<HashMap<String, LocalPackage>> {
             continue;
         };
 
+        let pkgname = match util::sanitize_pkgname(&pkgname) {
+            Ok(pkgname) => pkgname,
+            Err(error) => {
+                util::warn(format!("数据库中的包名无效，已忽略: {error:#}"));
+                continue;
+            }
+        };
         let filename = match util::sanitize_filename(&filename) {
             Ok(filename) => filename,
             Err(error) => {
@@ -173,6 +180,59 @@ pub fn repo_add(
         print!("{}", String::from_utf8_lossy(&output.stderr));
     }
     Ok(())
+}
+
+/// Remove package entries from the database. Package files are deleted
+/// separately, after the database has been updated successfully.
+pub fn repo_remove(runner: &Runner, db_path: &Path, names: &[String]) -> Result<()> {
+    if names.is_empty() {
+        return Ok(());
+    }
+    for name in names {
+        util::sanitize_pkgname(name)?;
+    }
+
+    let mut command = runner.command("repo-remove")?;
+    command.arg("--nocolor").arg(db_path);
+    for name in names {
+        command.arg(name);
+    }
+
+    let output = command.output().context("执行 repo-remove 失败")?;
+    if !output.status.success() {
+        bail!(
+            "repo-remove 失败:\n{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    if util::verbose() {
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+        print!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+    Ok(())
+}
+
+/// Delete the package archive and its signature from the repository.
+/// Returns the paths actually removed.
+pub fn remove_package_files(repo_dir: &Path, package: &LocalPackage) -> Result<Vec<PathBuf>> {
+    let archive = repo_dir.join(&package.filename);
+    let signature = util::sig_path(&archive);
+    let mut removed = Vec::new();
+
+    for path in [archive, signature] {
+        match fs::symlink_metadata(&path) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error).with_context(|| format!("检查 {} 失败", path.display()));
+            }
+        }
+        fs::remove_file(&path).with_context(|| format!("删除 {} 失败", path.display()))?;
+        removed.push(path);
+    }
+
+    Ok(removed)
 }
 
 #[derive(Debug, Default)]

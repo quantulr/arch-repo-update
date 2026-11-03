@@ -7,6 +7,7 @@
 - 以 `archrepo` 用户为每个软件包和仓库数据库生成 GPG 签名
 - 运行 `repo-add` 更新数据库
 - 清理被替换的旧版本文件
+- 删除 manifest 中已不存在的软件包
 - 校验并自动补签缺失或失效的签名
 
 默认配置针对本机：仓库目录 `/srv/http/repo/ayaya/os/x86_64`，数据库名 `ayaya`，签名用户 `archrepo`。所有默认值都可以用命令行参数覆盖。
@@ -22,9 +23,10 @@
 3. 只把需要同步的包下载到仓库目录内的临时目录，边下载边计算 SHA-256，并核对 manifest 中的 `size` 和 `sha256`。
 4. 以 `--sign-user` 指定的用户（默认 `archrepo`）为每个包生成二进制分离签名 `<包名>.sig`，并立即验签。
 5. 原子地安装包与签名到仓库目录，所有权改为 `archrepo`。
-6. 运行 `repo-add --prevent-downgrade`。成功后删除同一包的旧版本文件和 `.sig`（`--keep-old` 可关闭），再重新签名 `.db` 与 `.files` 数据库并维护 `.db.sig` / `.files.sig` 符号链接。
-7. 对 manifest 中已是最新的包，检查本地 `.sig`；缺失、无效或不是本仓库密钥签发的签名会被自动补签。
-8. 每次运行都会校验数据库签名。即使没有包更新，也能修复丢失或失效的数据库签名（自愈）。
+6. 运行 `repo-add --prevent-downgrade`。成功后删除同一包的旧版本文件和 `.sig`（`--keep-old` 可关闭）。
+7. 对本地数据库中存在、但当前 manifest 的目标架构列表中已不存在的包，运行 `repo-remove`，并删除对应的包文件与 `.sig`。此行为默认开启，可用 `--no-prune` 关闭；若 manifest 完全没有目标架构包，必须显式加 `--allow-empty-manifest` 才会删除全部本地包。
+8. 重新签名 `.db` 与 `.files` 数据库并维护 `.db.sig` / `.files.sig` 符号链接。每次运行都会校验数据库签名，缺失或失效时自动修复。
+9. 对 manifest 中已是最新的包，检查本地 `.sig`；缺失、无效或不是本仓库密钥签发的签名会被自动补签。
 
 单个包下载或签名失败不会阻止其他包同步，但程序最终会以非零状态退出，便于 systemd 或监控发现问题。
 
@@ -46,7 +48,7 @@ sudo install -m 755 target/release/arch-repo-update /usr/bin/arch-repo-update
 ```sh
 cd packaging
 makepkg -f --nodeps          # 本机 cargo/rustc 由 rustup 提供
-sudo pacman -U arch-repo-update-0.1.0-2-x86_64.pkg.tar.zst
+sudo pacman -U arch-repo-update-0.1.0-3-x86_64.pkg.tar.zst
 ```
 
 如果使用仓库中的 `cargo` 与 `rust` 包，可省略 `--nodeps`，或直接 `makepkg -si`。
@@ -133,13 +135,15 @@ journalctl -u arch-repo-update.service -n 100
 | `--key <KEY>` | 默认私钥 | 指定签名密钥（指纹、key ID 或 UID） |
 | `--allow-downgrade` | 关闭 | 允许同步比本地版本更低的远端版本 |
 | `--keep-old` | 关闭 | 保留被替换的旧版本软件包文件 |
+| `--no-prune` | 关闭 | 不删除 manifest 中已不存在的本地软件包 |
+| `--allow-empty-manifest` | 关闭 | manifest 无目标架构包时仍允许删除全部本地软件包 |
 | `--fix-ownership` | 关闭 | 递归修正仓库文件所有者为签名用户（需要 root） |
 | `--dry-run` | 关闭 | 只显示计划，不下载、不签名、不修改仓库 |
 | `--no-sign` | 关闭 | 不签名，仅下载并更新数据库（调试用） |
 | `--timeout <SECS>` | `600` | HTTP 超时 |
 | `-v, --verbose` | 关闭 | 输出详细日志 |
 
-运行身份：需要以 root 或 `--sign-user` 指定的用户运行。以 root 运行时，gpg 和 `repo-add` 仍会切换到签名用户执行，下载的文件会被 `chown` 给该用户；以 `archrepo` 运行时则全部直接执行。
+运行身份：需要以 root 或 `--sign-user` 指定的用户运行。以 root 运行时，gpg、`repo-add` 和 `repo-remove` 仍会切换到签名用户执行，下载的文件会被 `chown` 给该用户；以 `archrepo` 运行时则全部直接执行。
 
 ## 故障排查
 

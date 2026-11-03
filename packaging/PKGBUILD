@@ -2,7 +2,7 @@
 
 pkgname=arch-repo-update
 pkgver=0.1.0
-pkgrel=2
+pkgrel=3
 pkgdesc="Sync a pacman repository from the archlinux-repo release manifest and sign it"
 arch=('x86_64')
 url="https://github.com/quantulr/archlinux-repo"

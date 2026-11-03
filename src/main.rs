@@ -77,6 +77,14 @@ struct Args {
     #[arg(long)]
     keep_old: bool,
 
+    /// 不删除 manifest 中已不存在的本地软件包
+    #[arg(long)]
+    no_prune: bool,
+
+    /// 允许在 manifest 没有目标架构软件包时删除全部本地软件包
+    #[arg(long)]
+    allow_empty_manifest: bool,
+
     /// 只显示同步计划，不下载、不签名、不修改仓库
     #[arg(long)]
     dry_run: bool,
@@ -121,7 +129,7 @@ fn run(args: Args) -> Result<()> {
         let manifest = manifest::load(&args.manifest, Duration::from_secs(args.timeout))?;
         let db = local_repo::read_db(&db_path)?;
         let plan = sync::build_plan(&manifest, &db, &args.arch, args.allow_downgrade, &repo_dir)?;
-        sync::print_plan(&plan);
+        sync::print_plan(&plan, !args.no_prune, args.allow_empty_manifest);
         util::info("dry-run：未下载、未签名、未修改仓库");
         return Ok(());
     }
@@ -168,7 +176,7 @@ fn run(args: Args) -> Result<()> {
     util::debug(format!("本地数据库包含 {} 个软件包", db.len()));
 
     let plan = sync::build_plan(&manifest, &db, &args.arch, args.allow_downgrade, &repo_dir)?;
-    sync::print_plan(&plan);
+    sync::print_plan(&plan, !args.no_prune, args.allow_empty_manifest);
 
     let options = sync::SyncOptions {
         repo_dir: &repo_dir,
@@ -179,6 +187,8 @@ fn run(args: Args) -> Result<()> {
         timeout: Duration::from_secs(args.timeout),
         allow_downgrade: args.allow_downgrade,
         keep_old: args.keep_old,
+        prune: !args.no_prune,
+        allow_empty_manifest: args.allow_empty_manifest,
     };
     sync::execute(&plan, &options)?;
 

@@ -79,6 +79,23 @@ pub fn sanitize_filename(name: &str) -> Result<String> {
     Ok(name.to_string())
 }
 
+/// Validate a package name from the database or manifest before it is passed
+/// to repo-remove as an argument.
+pub fn sanitize_pkgname(name: &str) -> Result<String> {
+    if name.is_empty() {
+        bail!("包名为空");
+    }
+    if name.starts_with('-') || name.starts_with('.') {
+        bail!("包名不能以 '-' 或 '.' 开头: {name}");
+    }
+    if !name.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'@' | b'.' | b'_' | b'+' | b'-')
+    }) {
+        bail!("包名包含非法字符: {name}");
+    }
+    Ok(name.to_string())
+}
+
 const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Read the manifest from an HTTP(S) URL, a `file://` URL, or a local path.
@@ -167,6 +184,18 @@ mod tests {
         assert!(sanitize_filename("..").is_err());
         assert!(sanitize_filename("not-a-package.txt").is_err());
         assert!(sanitize_filename("").is_err());
+    }
+
+    #[test]
+    fn validates_package_names() {
+        assert!(sanitize_pkgname("fnm-bin").is_ok());
+        assert!(sanitize_pkgname("kero").is_ok());
+        assert!(sanitize_pkgname("foo_bar+baz@qux").is_ok());
+        assert!(sanitize_pkgname("-rf").is_err());
+        assert!(sanitize_pkgname(".hidden").is_err());
+        assert!(sanitize_pkgname("bad name").is_err());
+        assert!(sanitize_pkgname("a/b").is_err());
+        assert!(sanitize_pkgname("").is_err());
     }
 
     #[test]
