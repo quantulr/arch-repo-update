@@ -14,7 +14,7 @@ Group=archrepo
 # make sure it is used instead of the legacy sockets in ~/.gnupg.
 ExecStartPre=+/bin/sh -c 'install -d -o archrepo -g archrepo -m 700 /run/user/$(id -u archrepo)'
 
-ExecStart=/usr/local/bin/arch-repo-update --passphrase-file /etc/arch-repo-update/passphrase
+ExecStart=/usr/bin/arch-repo-update --passphrase-file /etc/arch-repo-update/passphrase
 Nice=10
 IOSchedulingClass=idle
 UMask=0022

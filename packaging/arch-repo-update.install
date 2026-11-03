@@ -1,0 +1,20 @@
+post_install() {
+  cat <<'EOF'
+==> arch-repo-update 已安装。
+
+首次使用前请创建 GPG 口令文件：
+  sudo install -d -o archrepo -g archrepo -m 700 /etc/arch-repo-update
+  sudo -u archrepo bash -c 'IFS= read -rs -p "GPG 口令: " p; printf "%s\n" "$p" >/etc/arch-repo-update/passphrase; chmod 600 /etc/arch-repo-update/passphrase'
+
+可选：修正已有仓库文件的所有者
+  sudo arch-repo-update --fix-ownership
+
+启用定时同步（默认每 30 分钟）
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now arch-repo-update.timer
+EOF
+}
+
+post_upgrade() {
+  post_install
+}

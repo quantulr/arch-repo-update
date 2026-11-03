@@ -36,8 +36,30 @@
 
 ```sh
 cargo build --release
-sudo install -m 755 target/release/arch-repo-update /usr/local/bin/arch-repo-update
+sudo install -m 755 target/release/arch-repo-update /usr/bin/arch-repo-update
 ```
+
+### Arch 软件包
+
+`packaging/` 下提供了 PKGBUILD，直接使用当前检出构建：
+
+```sh
+cd packaging
+makepkg -f --nodeps          # 本机 cargo/rustc 由 rustup 提供
+sudo pacman -U arch-repo-update-0.1.0-2-x86_64.pkg.tar.zst
+```
+
+如果使用仓库中的 `cargo` 与 `rust` 包，可省略 `--nodeps`，或直接 `makepkg -si`。
+
+软件包会安装：
+
+- `/usr/bin/arch-repo-update`
+- `/usr/lib/systemd/system/arch-repo-update.{service,timer}`
+- `/usr/lib/sysusers.d/arch-repo-update.conf`（创建 `archrepo` 用户）
+- `/usr/lib/tmpfiles.d/arch-repo-update.conf`（创建 `/var/lib/archrepo`）
+- 文档与许可证
+
+PKGBUILD 使用 `source=()` 从当前检出构建，适合本地打包；发布到公共仓库后建议改为固定 commit 或源码 tarball 的 `source`。
 
 ## 首次配置
 
@@ -47,7 +69,7 @@ sudo install -m 755 target/release/arch-repo-update /usr/local/bin/arch-repo-upd
 
 ```sh
 sudo install -d -o archrepo -g archrepo -m 700 /etc/arch-repo-update
-sudo -u archrepo sh -c 'IFS= read -rs -p "GPG 口令: " p; printf "%s\n" "$p" >/etc/arch-repo-update/passphrase; chmod 600 /etc/arch-repo-update/passphrase'
+sudo -u archrepo bash -c 'IFS= read -rs -p "GPG 口令: " p; printf "%s\n" "$p" >/etc/arch-repo-update/passphrase; chmod 600 /etc/arch-repo-update/passphrase'
 ```
 
 ### 2. 修正历史文件所有权（可选）
@@ -79,9 +101,19 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now arch-repo-update.timer
 ```
 
-定时器默认在每天本地时间 09:00（上游 00:00 UTC 构建之后）运行，并带最多 20 分钟随机延迟。可用 `systemctl list-timers arch-repo-update.timer` 查看，手动触发：
+通过软件包安装时，两个单元已经在 `/usr/lib/systemd/system/`，只需执行 `daemon-reload` 和 `enable` 两步。
+
+定时器默认每 30 分钟检查一次，并带最多 2 分钟随机延迟。上游通常每天 00:00 UTC 构建，也可以手动触发，因此高频检查能更快发现更新。如需调整频率，修改 `[Timer]` 中的 `OnCalendar`（例如每 15 分钟：`*-*-* *:00/15:00`），然后执行：
 
 ```sh
+sudo systemctl daemon-reload
+sudo systemctl restart arch-repo-update.timer
+```
+
+查看下次运行时间与手动触发：
+
+```sh
+systemctl list-timers arch-repo-update.timer
 sudo systemctl start arch-repo-update.service
 journalctl -u arch-repo-update.service -n 100
 ```

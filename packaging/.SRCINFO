@@ -1,0 +1,16 @@
+pkgbase = arch-repo-update
+	pkgdesc = Sync a pacman repository from the archlinux-repo release manifest and sign it
+	pkgver = 0.1.0
+	pkgrel = 2
+	url = https://github.com/quantulr/archlinux-repo
+	install = arch-repo-update.install
+	arch = x86_64
+	license = MIT
+	makedepends = cargo
+	makedepends = rust
+	depends = glibc
+	depends = gcc-libs
+	depends = gnupg
+	depends = pacman
+
+pkgname = arch-repo-update

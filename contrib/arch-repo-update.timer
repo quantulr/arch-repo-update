@@ -1,10 +1,14 @@
 [Unit]
-Description=Daily sync of the LAN Arch repository
+Description=Periodic sync of the LAN Arch repository
 
 [Timer]
-# Upstream builds daily at 00:00 UTC (08:00 CST). Run afterwards.
-OnCalendar=*-*-* 09:00:00
-RandomizedDelaySec=20m
+# Check every 30 minutes. Upstream normally builds daily at 00:00 UTC but can
+# also be triggered manually, so a short interval reduces detection lag.
+# For a different frequency adjust OnCalendar, e.g. every 15 minutes:
+#   OnCalendar=*-*-* *:00/15:00
+OnCalendar=*-*-* *:00/30:00
+AccuracySec=1m
+RandomizedDelaySec=2m
 Persistent=true
 Unit=arch-repo-update.service
 

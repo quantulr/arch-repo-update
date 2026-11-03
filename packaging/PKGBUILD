@@ -1,0 +1,42 @@
+# Maintainer: quantulr
+
+pkgname=arch-repo-update
+pkgver=0.1.0
+pkgrel=2
+pkgdesc="Sync a pacman repository from the archlinux-repo release manifest and sign it"
+arch=('x86_64')
+url="https://github.com/quantulr/archlinux-repo"
+license=('MIT')
+depends=('glibc' 'gcc-libs' 'gnupg' 'pacman')
+makedepends=('cargo' 'rust')
+install="${pkgname}.install"
+source=()
+sha256sums=()
+
+build() {
+  cd "${startdir}/.."
+  cargo build --release --locked
+}
+
+check() {
+  cd "${startdir}/.."
+  cargo test --locked
+}
+
+package() {
+  cd "${startdir}/.."
+
+  install -Dm755 target/release/arch-repo-update "${pkgdir}/usr/bin/arch-repo-update"
+
+  install -Dm644 contrib/arch-repo-update.service \
+    "${pkgdir}/usr/lib/systemd/system/arch-repo-update.service"
+  install -Dm644 contrib/arch-repo-update.timer \
+    "${pkgdir}/usr/lib/systemd/system/arch-repo-update.timer"
+  install -Dm644 contrib/arch-repo-update.sysusers \
+    "${pkgdir}/usr/lib/sysusers.d/arch-repo-update.conf"
+  install -Dm644 contrib/arch-repo-update.tmpfiles \
+    "${pkgdir}/usr/lib/tmpfiles.d/arch-repo-update.conf"
+
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/arch-repo-update/README.md"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/arch-repo-update/LICENSE"
+}
