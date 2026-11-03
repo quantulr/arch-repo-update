@@ -1,0 +1,34 @@
+[Unit]
+Description=Sync the LAN Arch repository from the archlinux-repo release manifest
+Documentation=https://github.com/quantulr/archlinux-repo
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=archrepo
+Group=archrepo
+
+# GnuPG keeps its agent sockets in /run/user/<uid>/gnupg. A system service
+# does not get a PAM session, so create the runtime directory explicitly to
+# make sure it is used instead of the legacy sockets in ~/.gnupg.
+ExecStartPre=+/bin/sh -c 'install -d -o archrepo -g archrepo -m 700 /run/user/$(id -u archrepo)'
+
+ExecStart=/usr/local/bin/arch-repo-update --passphrase-file /etc/arch-repo-update/passphrase
+Nice=10
+IOSchedulingClass=idle
+UMask=0022
+TimeoutStartSec=30min
+
+# The repository lives in /srv and the GPG home in /var/lib/archrepo.
+# ProtectSystem=full keeps /etc, /usr and /boot read-only while leaving those
+# paths writable.
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes

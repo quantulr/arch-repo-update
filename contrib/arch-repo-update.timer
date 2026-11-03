@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily sync of the LAN Arch repository
+
+[Timer]
+# Upstream builds daily at 00:00 UTC (08:00 CST). Run afterwards.
+OnCalendar=*-*-* 09:00:00
+RandomizedDelaySec=20m
+Persistent=true
+Unit=arch-repo-update.service
+
+[Install]
+WantedBy=timers.target
