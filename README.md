@@ -48,7 +48,7 @@ sudo install -m 755 target/release/arch-repo-update /usr/bin/arch-repo-update
 ```sh
 cd packaging
 makepkg -f --nodeps          # 本机 cargo/rustc 由 rustup 提供
-sudo pacman -U arch-repo-update-0.1.0-3-x86_64.pkg.tar.zst
+sudo pacman -U arch-repo-update-0.1.0-4-x86_64.pkg.tar.zst
 ```
 
 如果使用仓库中的 `cargo` 与 `rust` 包，可省略 `--nodeps`，或直接 `makepkg -si`。
@@ -162,13 +162,23 @@ sudo kill <PID>
 sudo -u archrepo gpgconf --kill all
 ```
 
-GnuPG 2.4 优先把 agent/keyboxd 套接字放在 `/run/user/<uid>/gnupg`，该目录不存在时退回 `~/.gnupg`。两种位置各启动一个 keyboxd 时会争用同一个公钥数据库锁，表现为 `waiting for lock ... Connection timed out`。本程序会显式使用已存在且属于签名用户的 `/run/user/<uid>`；systemd 服务也会通过 `ExecStartPre` 创建它。手动准备该目录：
+GnuPG 2.4 优先把 agent/keyboxd 套接字放在 `/run/user/<uid>/gnupg`，该目录不存在时退回 `~/.gnupg`。两种位置各启动一个 keyboxd 时会争用同一个公钥数据库锁，表现为 `waiting for lock ... Connection timed out`。本程序会显式使用已存在且属于签名用户的 `/run/user/<uid>`；systemd 服务也会通过 `ExecStartPre` 创建 `/run/user/<uid>` 与 `/run/user/<uid>/gnupg`。手动准备：
 
 ```sh
-sudo install -d -o archrepo -g archrepo -m 700 /run/user/$(id -u archrepo)
+sudo install -d -o archrepo -g archrepo -m 700 /run/user/$(id -u archrepo) /run/user/$(id -u archrepo)/gnupg
 ```
 
 如果 `gpgconf --kill all` 无法清理残留进程（它只会联系当前套接字对应的 agent），用上面的 `ps` + `kill` 按 PID 终止。
+
+### `gpg: failed to start gpg-agent` / `can't connect to the gpg-agent`
+
+通常是 `/run/user/<uid>/gnupg` 不存在或不可写，或者 systemd 单元启用了 `ProtectHome=read-only`。`/run/user` 位于 `/run` tmpfs 上，`ProtectHome=read-only` 会把它变成只读，导致 gpg-agent 无法创建套接字。确保目录存在并归签名用户所有：
+
+```sh
+sudo install -d -o archrepo -g archrepo -m 700 /run/user/$(id -u archrepo)/gnupg
+```
+
+本项目的 systemd 单元已通过 `ExecStartPre` 创建该目录，并且不使用 `ProtectHome=read-only`。
 
 ### `GPG 签名失败` / `No passphrase`
 

@@ -10,9 +10,10 @@ User=archrepo
 Group=archrepo
 
 # GnuPG keeps its agent sockets in /run/user/<uid>/gnupg. A system service
-# does not get a PAM session, so create the runtime directory explicitly to
-# make sure it is used instead of the legacy sockets in ~/.gnupg.
-ExecStartPre=+/bin/sh -c 'install -d -o archrepo -g archrepo -m 700 /run/user/$(id -u archrepo)'
+# does not get a PAM session, so create the runtime and socket directories
+# explicitly to make sure they are used instead of the legacy sockets in
+# ~/.gnupg.
+ExecStartPre=+/bin/sh -c 'uid=$(id -u archrepo); install -d -o archrepo -g archrepo -m 700 /run/user/$uid /run/user/$uid/gnupg'
 
 ExecStart=/usr/bin/arch-repo-update --passphrase-file /etc/arch-repo-update/passphrase
 Nice=10
@@ -23,8 +24,10 @@ TimeoutStartSec=30min
 # The repository lives in /srv and the GPG home in /var/lib/archrepo.
 # ProtectSystem=full keeps /etc, /usr and /boot read-only while leaving those
 # paths writable.
+#
+# Do not set ProtectHome=read-only: /run/user lives on the /run tmpfs, so it
+# would become read-only and gpg-agent could no longer create its sockets.
 ProtectSystem=full
-ProtectHome=read-only
 PrivateTmp=yes
 NoNewPrivileges=yes
 ProtectKernelTunables=yes
